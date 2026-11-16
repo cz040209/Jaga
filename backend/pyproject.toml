@@ -1,0 +1,47 @@
+[project]
+name = "jaga-backend"
+version = "0.1.0"
+description = "Jaga backend: mock bank API, real-time fraud engine and AI services"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Web API
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # Database
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
+    "asyncpg>=0.30",
+    # Redis (event stream, feature store, cache)
+    "redis>=5.2",
+    # Auth
+    "pyjwt>=2.10",
+    "bcrypt>=4.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
