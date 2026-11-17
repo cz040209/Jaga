@@ -20,6 +20,7 @@ dependencies = [
     # Auth
     "pyjwt>=2.10",
     "bcrypt>=4.2",
+    "email-validator>=2.2",
 ]
 
 [dependency-groups]
@@ -38,6 +39,10 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
+[tool.ruff.lint.isort]
+# backend/alembic/ (our migrations folder) is not the alembic library.
+known-third-party = ["alembic"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
@@ -45,4 +50,9 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]   # lets tests do "from app... import ..." from backend/
 asyncio_mode = "auto"
+# One event loop for the whole test run, so the app's DB connection pool
+# isn't tied to a loop that a previous test already closed.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"

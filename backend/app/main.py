@@ -4,9 +4,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.api import auth
+from app.api.errors import register_exception_handlers
 from app.core.cache import redis_client
 from app.core.config import settings
 from app.core.db import engine
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -15,6 +18,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await redis_client.aclose()  # and Redis connections
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+register_exception_handlers(app)
+app.include_router(auth.router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
