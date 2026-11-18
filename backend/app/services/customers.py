@@ -127,10 +127,9 @@ async def rename_device(
 
 
 async def forget_device(db: AsyncSession, customer_id: int, device_id: int) -> None:
-    """Sign the device out and forget it, so its next login counts as a new device."""
+    """Sign the device out and forget it (soft delete), so its next login counts as new."""
     device = await _get_own_device(db, customer_id, device_id)
-    await session_crud.revoke_all_for_device(
-        db, device.id, reason="device_forgotten", now=_now()
-    )
-    await device_crud.delete(db, device)
+    now = _now()
+    await session_crud.revoke_all_for_device(db, device.id, reason="device_forgotten", now=now)
+    device_crud.soft_delete(device, now)
     await db.commit()

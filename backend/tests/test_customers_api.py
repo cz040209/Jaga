@@ -236,9 +236,7 @@ async def test_list_and_rename_devices(client: AsyncClient) -> None:
     assert missing.status_code == 404
 
 
-async def test_forget_device_signs_it_out_and_next_login_is_new(
-    client: AsyncClient, db: AsyncSession
-) -> None:
+async def test_forget_device_is_a_soft_delete(client: AsyncClient, db: AsyncSession) -> None:
     phone, laptop = await two_devices(client)
     devices = (
         await client.get("/customers/me/devices", headers=bearer(phone["access_token"]))
@@ -249,13 +247,36 @@ async def test_forget_device_signs_it_out_and_next_login_is_new(
         f"/customers/me/devices/{laptop_device['id']}", headers=bearer(phone["access_token"])
     )
     assert response.status_code == 204
-    assert await db.get(Device, laptop_device["id"]) is None
+
+    # The row is kept for history, only marked as deleted.
+    forgotten = await db.get(Device, laptop_device["id"])
+    assert forgotten is not None and forgotten.deleted_at is not None
+
+    # Hidden from the API: not listed, can't be renamed or forgotten twice.
+    listed = (
+        await client.get("/customers/me/devices", headers=bearer(phone["access_token"]))
+    ).json()
+    assert laptop_device["id"] not in [d["id"] for d in listed]
+    renamed = await client.patch(
+        f"/customers/me/devices/{laptop_device['id']}",
+        headers=bearer(phone["access_token"]),
+        json={"display_name": "x"},
+    )
+    assert renamed.status_code == 404
+
+    # Its session is signed out.
     assert (
         await client.get("/customers/me", headers=bearer(laptop["access_token"]))
     ).status_code == 401
 
+    # Same laptop logs in again: a NEW device row (partial unique index allows it).
     relogin = await login(client, fingerprint="fp-laptop-0002")
     assert relogin.json()["is_new_device"] is True
+    relisted = (
+        await client.get("/customers/me/devices", headers=bearer(phone["access_token"]))
+    ).json()
+    assert len(relisted) == 2
+    assert laptop_device["id"] not in [d["id"] for d in relisted]
 
 
 # ---------- Close account ----------

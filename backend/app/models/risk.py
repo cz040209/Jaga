@@ -22,7 +22,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import (
     Base,
     EMPTY_JSON,
+    NOT_DELETED,
     IntegerPrimaryKeyMixin,
+    SoftDeleteMixin,
     TimestampMixin,
     enum_type,
 )
@@ -33,12 +35,11 @@ from app.models.enums import (
 )
 
 
-class FraudRule(Base, IntegerPrimaryKeyMixin, TimestampMixin):
+class FraudRule(Base, IntegerPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "fraud_rules"
 
     rule_key: Mapped[str] = mapped_column(
         String(100),
-        unique=True,
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -68,6 +69,12 @@ class FraudRule(Base, IntegerPrimaryKeyMixin, TimestampMixin):
             name="ck_rules_version",
         ),
         Index("ix_rules_status_priority", "status", "priority"),
+        Index(
+            "uq_rules_rule_key",
+            "rule_key",
+            unique=True,
+            postgresql_where=NOT_DELETED,
+        ),
     )
 
 
@@ -251,6 +258,7 @@ class WatchlistEntry(
     Base,
     IntegerPrimaryKeyMixin,
     TimestampMixin,
+    SoftDeleteMixin,
 ):
     __tablename__ = "watchlist_entries"
 
@@ -283,10 +291,12 @@ class WatchlistEntry(
     )
 
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_watchlist_entity_hash",
             "entity_type",
             "normalized_value_hash",
-            name="uq_watchlist_entity_hash",
+            unique=True,
+            postgresql_where=NOT_DELETED,
         ),
         Index(
             "ix_watchlist_lookup",

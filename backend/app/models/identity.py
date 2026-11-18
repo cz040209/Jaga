@@ -24,7 +24,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import (
     Base,
     EMPTY_JSON,
+    NOT_DELETED,
     IntegerPrimaryKeyMixin,
+    SoftDeleteMixin,
     TimestampMixin,
     enum_type,
 )
@@ -89,7 +91,7 @@ class Customer(Base, IntegerPrimaryKeyMixin, TimestampMixin):
         Index("ix_customers_status", "status"),
     )
 
-class Device(Base, IntegerPrimaryKeyMixin, TimestampMixin):
+class Device(Base, IntegerPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "devices"
 
     customer_id: Mapped[int] = mapped_column(
@@ -132,6 +134,7 @@ class Device(Base, IntegerPrimaryKeyMixin, TimestampMixin):
             "customer_id",
             "fingerprint_hash",
             unique=True,
+            postgresql_where=NOT_DELETED,
         ),
         Index("ix_devices_fingerprint", "fingerprint_hash"),
         Index(
@@ -246,7 +249,7 @@ class LoginEvent(Base, IntegerPrimaryKeyMixin):
     )
 
 
-class StaffUser(Base, IntegerPrimaryKeyMixin, TimestampMixin):
+class StaffUser(Base, IntegerPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "staff_users"
 
     email: Mapped[str] = mapped_column(String(320), nullable=False)
@@ -270,6 +273,7 @@ class StaffUser(Base, IntegerPrimaryKeyMixin, TimestampMixin):
             "uq_staff_email_lower",
             func.lower(email),
             unique=True,
+            postgresql_where=NOT_DELETED,
         ),
         Index("ix_staff_role_status", "role", "status"),
     )

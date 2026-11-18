@@ -15,7 +15,6 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
     func,
     text,
 )
@@ -26,7 +25,9 @@ from app.models.base import (
     Base,
     EMPTY_JSON,
     EMPTY_JSON_LIST,
+    NOT_DELETED,
     IntegerPrimaryKeyMixin,
+    SoftDeleteMixin,
     TimestampMixin,
     enum_type,
 )
@@ -273,6 +274,7 @@ class ScamKnowledgeChunk(
     Base,
     IntegerPrimaryKeyMixin,
     TimestampMixin,
+    SoftDeleteMixin,
 ):
     __tablename__ = "scam_knowledge_chunks"
 
@@ -315,11 +317,13 @@ class ScamKnowledgeChunk(
             "chunk_number >= 0",
             name="ck_knowledge_chunk_number",
         ),
-        UniqueConstraint(
+        Index(
+            "uq_knowledge_source_version_chunk",
             "source_name",
             "document_version",
             "chunk_number",
-            name="uq_knowledge_source_version_chunk",
+            unique=True,
+            postgresql_where=NOT_DELETED,
         ),
         Index(
             "ix_knowledge_language_active",

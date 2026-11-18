@@ -24,6 +24,7 @@ from app.models.base import (
     Base,
     EMPTY_JSON,
     IntegerPrimaryKeyMixin,
+    SoftDeleteMixin,
     TimestampMixin,
     enum_type,
 )
@@ -126,7 +127,7 @@ class CaseEvent(Base, IntegerPrimaryKeyMixin):
     )
 
 
-class CaseNote(Base, IntegerPrimaryKeyMixin):
+class CaseNote(Base, IntegerPrimaryKeyMixin, SoftDeleteMixin):
     __tablename__ = "case_notes"
 
     case_id: Mapped[int] = mapped_column(

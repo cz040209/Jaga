@@ -25,7 +25,9 @@ from app.models.base import (
     Base,
     EMPTY_JSON,
     EMPTY_JSON_LIST,
+    NOT_DELETED,
     IntegerPrimaryKeyMixin,
+    SoftDeleteMixin,
     TimestampMixin,
     enum_type,
 )
@@ -105,14 +107,11 @@ class BankAccount(Base, IntegerPrimaryKeyMixin, TimestampMixin):
     )
 
 
-class Merchant(Base, IntegerPrimaryKeyMixin, TimestampMixin):
+class Merchant(Base, IntegerPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "merchants"
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    registration_number: Mapped[str | None] = mapped_column(
-        String(100),
-        unique=True,
-    )
+    registration_number: Mapped[str | None] = mapped_column(String(100))
     settlement_account_id: Mapped[int] = mapped_column(
         ForeignKey("bank_accounts.id", ondelete="RESTRICT"),
         unique=True,
@@ -139,6 +138,12 @@ class Merchant(Base, IntegerPrimaryKeyMixin, TimestampMixin):
 
     __table_args__ = (
         Index("ix_merchants_active_risk", "active", "risk_level"),
+        Index(
+            "uq_merchants_registration_number",
+            "registration_number",
+            unique=True,
+            postgresql_where=NOT_DELETED,
+        ),
     )
 
 
@@ -146,6 +151,7 @@ class MerchantQRCode(
     Base,
     IntegerPrimaryKeyMixin,
     TimestampMixin,
+    SoftDeleteMixin,
 ):
     __tablename__ = "merchant_qr_codes"
 
