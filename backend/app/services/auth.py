@@ -1,19 +1,18 @@
 """Customer authentication: register, login, refresh, logout.
 
-This module knows nothing about HTTP. It raises AuthError subclasses, and the
-API layer (app/api/errors.py) turns them into status codes. That keeps the same
-logic reusable from the Telegram bot, background jobs and tests.
+Business rules live here; every database read/write goes through app/crud.
+This module knows nothing about HTTP: it raises ServiceError subclasses and
+app/api/errors.py turns them into status codes, so the same logic can be
+reused by the Telegram bot, background jobs and tests.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
-from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,23 +20,25 @@ from app.core.config import settings
 from app.core.security import (
     create_access_token,
     hash_password,
+    hash_password_async,
     hash_refresh_token,
     new_refresh_token,
-    verify_password,
+    verify_password_async,
 )
+from app.crud import customer as customer_crud
+from app.crud import customer_session as session_crud
+from app.crud import device as device_crud
+from app.crud import login_event as login_event_crud
 from app.models.enums import CustomerStatus, DeviceTrustStatus, SessionStatus
-from app.models.identity import Customer, CustomerSession, Device, LoginEvent
+from app.models.identity import Customer, CustomerSession, Device
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
+from app.services.errors import ServiceError
 
 
 # ---------- Errors ----------
-class AuthError(Exception):
+class AuthError(ServiceError):
     code = "auth_error"
     message = "Authentication failed"
-
-    def __init__(self, message: str | None = None) -> None:
-        self.message = message or type(self).message
-        super().__init__(self.message)
 
 
 class EmailAlreadyRegistered(AuthError):
@@ -93,7 +94,11 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _hash_fingerprint(fingerprint: str) -> str:
+def _session_expiry(now: datetime) -> datetime:
+    return now + timedelta(days=settings.refresh_token_ttl_days)
+
+
+def hash_fingerprint(fingerprint: str) -> str:
     return hashlib.sha256(fingerprint.encode()).hexdigest()
 
 
@@ -102,19 +107,9 @@ def _dummy_password_hash() -> str:
     return hash_password("jaga-timing-equaliser")
 
 
-async def _hash_password(password: str) -> str:
-    # bcrypt takes ~0.2 s of CPU. Running it in a thread keeps the event loop
-    # free to serve other requests meanwhile.
-    return await asyncio.to_thread(hash_password, password)
-
-
-async def _verify_password(password: str, password_hash: str) -> bool:
-    return await asyncio.to_thread(verify_password, password, password_hash)
-
-
-def _token_pair(customer_id: int, refresh_token: str) -> TokenPair:
+def _token_pair(customer_id: int, session_id: int, refresh_token: str) -> TokenPair:
     return TokenPair(
-        access_token=create_access_token(customer_id, "customer"),
+        access_token=create_access_token(customer_id, "customer", session_id=session_id),
         refresh_token=refresh_token,
         expires_in=settings.jwt_access_ttl_minutes * 60,
     )
@@ -133,30 +128,20 @@ async def _resolve_device(
     if not fingerprint:
         return None, True
 
-    fingerprint_hash = _hash_fingerprint(fingerprint)
-    device = await db.scalar(
-        select(Device).where(
-            Device.customer_id == customer_id,
-            Device.fingerprint_hash == fingerprint_hash,
-        )
-    )
     now = _now()
+    fingerprint_hash = hash_fingerprint(fingerprint)
+    device = await device_crud.get_by_fingerprint(db, customer_id, fingerprint_hash)
     if device is None:
-        device = Device(
+        device = await device_crud.create(
+            db,
             customer_id=customer_id,
             fingerprint_hash=fingerprint_hash,
             user_agent=client.user_agent,
-            trust_status=DeviceTrustStatus.UNKNOWN,
-            first_seen_at=now,
-            last_seen_at=now,
+            now=now,
         )
-        db.add(device)
-        await db.flush()  # get device.id
         return device, True
 
-    device.last_seen_at = now
-    if client.user_agent:
-        device.user_agent = client.user_agent
+    device_crud.touch(device, user_agent=client.user_agent, now=now)
     return device, False
 
 
@@ -168,78 +153,34 @@ async def _open_session(
 ) -> tuple[CustomerSession, TokenPair]:
     refresh_token, refresh_hash = new_refresh_token()
     now = _now()
-    session_row = CustomerSession(
+    session_row = await session_crud.create(
+        db,
         customer_id=customer.id,
         device_id=device.id if device else None,
         refresh_token_hash=refresh_hash,
-        status=SessionStatus.ACTIVE,
         ip_address=client.ip_address,
-        started_at=now,
-        last_activity_at=now,
-        expires_at=now + timedelta(days=settings.refresh_token_ttl_days),
+        now=now,
+        expires_at=_session_expiry(now),
     )
-    db.add(session_row)
-    await db.flush()  # get session_row.id
-    return session_row, _token_pair(customer.id, refresh_token)
-
-
-def _record_login(
-    db: AsyncSession,
-    *,
-    email: str,
-    succeeded: bool,
-    client: ClientInfo,
-    customer_id: int | None = None,
-    device_id: int | None = None,
-    session_id: int | None = None,
-    failure_reason: str | None = None,
-    is_new_device: bool = False,
-) -> None:
-    """Every attempt, good or bad, is evidence for the account-takeover detector."""
-    db.add(
-        LoginEvent(
-            customer_id=customer_id,
-            device_id=device_id,
-            session_id=session_id,
-            attempted_email=email,
-            succeeded=succeeded,
-            failure_reason=failure_reason,
-            is_new_device=is_new_device,
-            ip_address=client.ip_address,
-            risk_signals={},
-        )
-    )
-
-
-async def _find_session_for_update(db: AsyncSession, refresh_token: str) -> CustomerSession | None:
-    # FOR UPDATE locks the row, so two refresh calls racing with the same token
-    # can't both succeed.
-    return await db.scalar(
-        select(CustomerSession)
-        .where(CustomerSession.refresh_token_hash == hash_refresh_token(refresh_token))
-        .with_for_update()
-    )
+    return session_row, _token_pair(customer.id, session_row.id, refresh_token)
 
 
 # ---------- Public API ----------
 async def register(db: AsyncSession, data: RegisterRequest, client: ClientInfo) -> AuthResult:
-    if await db.scalar(select(Customer.id).where(func.lower(Customer.email) == data.email)):
+    if await customer_crud.email_exists(db, data.email):
         raise EmailAlreadyRegistered()
-    if await db.scalar(select(Customer.id).where(Customer.phone_number == data.phone_number)):
+    if await customer_crud.phone_exists(db, data.phone_number):
         raise PhoneAlreadyRegistered()
 
-    customer = Customer(
-        email=data.email,
-        phone_number=data.phone_number,
-        full_name=data.full_name,
-        password_hash=await _hash_password(data.password),
-        preferred_language=data.preferred_language,
-        status=CustomerStatus.ACTIVE,
-        failed_login_count=0,
-    )
-    db.add(customer)
     try:
-        await db.flush()
+        customer = await customer_crud.create(
+            db,
+            email=data.email,
+            phone_number=data.phone_number,
+            full_name=data.full_name,
+            password_hash=await hash_password_async(data.password),
+            preferred_language=data.preferred_language,
+        )
     except IntegrityError as exc:
         # Two sign-ups with the same email at the same moment: both passed the
         # checks above, but the unique index lets only one in.
@@ -250,12 +191,12 @@ async def register(db: AsyncSession, data: RegisterRequest, client: ClientInfo) 
 
     device, is_new_device = await _resolve_device(db, customer.id, data.device_fingerprint, client)
     session_row, tokens = await _open_session(db, customer, device, client)
-    customer.last_login_at = _now()
-    _record_login(
+    customer_crud.record_successful_login(customer, _now())
+    login_event_crud.create(
         db,
-        email=data.email,
+        attempted_email=data.email,
         succeeded=True,
-        client=client,
+        ip_address=client.ip_address,
         customer_id=customer.id,
         device_id=device.id if device else None,
         session_id=session_row.id,
@@ -267,26 +208,29 @@ async def register(db: AsyncSession, data: RegisterRequest, client: ClientInfo) 
 
 
 async def login(db: AsyncSession, data: LoginRequest, client: ClientInfo) -> AuthResult:
-    customer = await db.scalar(select(Customer).where(func.lower(Customer.email) == data.email))
+    customer = await customer_crud.get_by_email(db, data.email)
 
     if customer is None:
-        # Spend the same ~0.2 s as a real check, so response time doesn't reveal
-        # whether the email exists.
-        await _verify_password(data.password, _dummy_password_hash())
-        _record_login(
-            db, email=data.email, succeeded=False, client=client, failure_reason="unknown_email"
+        # Spend the same ~0.2 s as a real check, so response time doesn't
+        # reveal whether the email exists.
+        await verify_password_async(data.password, _dummy_password_hash())
+        login_event_crud.create(
+            db,
+            attempted_email=data.email,
+            succeeded=False,
+            ip_address=client.ip_address,
+            failure_reason="unknown_email",
         )
         await db.commit()
         raise InvalidCredentials()
 
-    if not await _verify_password(data.password, customer.password_hash):
-        # SQL-side increment: correct even if two failed logins happen at once.
-        customer.failed_login_count = Customer.failed_login_count + 1
-        _record_login(
+    if not await verify_password_async(data.password, customer.password_hash):
+        customer_crud.record_failed_login(customer)
+        login_event_crud.create(
             db,
-            email=data.email,
+            attempted_email=data.email,
             succeeded=False,
-            client=client,
+            ip_address=client.ip_address,
             customer_id=customer.id,
             failure_reason="wrong_password",
         )
@@ -296,11 +240,11 @@ async def login(db: AsyncSession, data: LoginRequest, client: ClientInfo) -> Aut
     # Status is checked only AFTER the password, so a stranger can't learn
     # that an account is frozen.
     if customer.status != CustomerStatus.ACTIVE:
-        _record_login(
+        login_event_crud.create(
             db,
-            email=data.email,
+            attempted_email=data.email,
             succeeded=False,
-            client=client,
+            ip_address=client.ip_address,
             customer_id=customer.id,
             failure_reason=f"account_{customer.status.value}",
         )
@@ -309,11 +253,11 @@ async def login(db: AsyncSession, data: LoginRequest, client: ClientInfo) -> Aut
 
     device, is_new_device = await _resolve_device(db, customer.id, data.device_fingerprint, client)
     if device is not None and device.trust_status == DeviceTrustStatus.BLOCKED:
-        _record_login(
+        login_event_crud.create(
             db,
-            email=data.email,
+            attempted_email=data.email,
             succeeded=False,
-            client=client,
+            ip_address=client.ip_address,
             customer_id=customer.id,
             device_id=device.id,
             failure_reason="device_blocked",
@@ -322,13 +266,12 @@ async def login(db: AsyncSession, data: LoginRequest, client: ClientInfo) -> Aut
         raise DeviceBlocked()
 
     session_row, tokens = await _open_session(db, customer, device, client)
-    customer.failed_login_count = 0
-    customer.last_login_at = _now()
-    _record_login(
+    customer_crud.record_successful_login(customer, _now())
+    login_event_crud.create(
         db,
-        email=data.email,
+        attempted_email=data.email,
         succeeded=True,
-        client=client,
+        ip_address=client.ip_address,
         customer_id=customer.id,
         device_id=device.id if device else None,
         session_id=session_row.id,
@@ -340,42 +283,44 @@ async def login(db: AsyncSession, data: LoginRequest, client: ClientInfo) -> Aut
 
 
 async def refresh(db: AsyncSession, refresh_token: str, client: ClientInfo) -> TokenPair:
-    session_row = await _find_session_for_update(db, refresh_token)
+    session_row = await session_crud.get_by_refresh_hash_for_update(
+        db, hash_refresh_token(refresh_token)
+    )
     if session_row is None or session_row.status != SessionStatus.ACTIVE:
         raise InvalidRefreshToken()
 
     now = _now()
     if session_row.expires_at <= now:
-        session_row.status = SessionStatus.EXPIRED
+        session_crud.mark_expired(session_row)
         await db.commit()
         raise InvalidRefreshToken()
 
-    customer = await db.get(Customer, session_row.customer_id)
+    customer = await customer_crud.get(db, session_row.customer_id)
     if customer is None or customer.status != CustomerStatus.ACTIVE:
         # Kill switch: a frozen account can't get new access tokens.
-        session_row.status = SessionStatus.REVOKED
-        session_row.revoked_at = now
-        session_row.revoke_reason = "account_not_active"
+        session_crud.revoke(session_row, reason="account_not_active", now=now)
         await db.commit()
         raise InvalidRefreshToken()
 
     # Rotation: the old refresh token stops working the moment this commits.
-    new_token, new_hash = new_refresh_token()
-    session_row.refresh_token_hash = new_hash
-    session_row.last_activity_at = now
     # Sliding expiry: the session lives 30 days after its LAST use.
-    session_row.expires_at = now + timedelta(days=settings.refresh_token_ttl_days)
-    if client.ip_address:
-        session_row.ip_address = client.ip_address
+    new_token, new_hash = new_refresh_token()
+    session_crud.rotate(
+        session_row,
+        refresh_token_hash=new_hash,
+        now=now,
+        expires_at=_session_expiry(now),
+        ip_address=client.ip_address,
+    )
     await db.commit()
-    return _token_pair(customer.id, new_token)
+    return _token_pair(customer.id, session_row.id, new_token)
 
 
 async def logout(db: AsyncSession, refresh_token: str) -> None:
     """Revoke the session. Always succeeds, even for unknown tokens (nothing to leak)."""
-    session_row = await _find_session_for_update(db, refresh_token)
+    session_row = await session_crud.get_by_refresh_hash_for_update(
+        db, hash_refresh_token(refresh_token)
+    )
     if session_row is not None and session_row.status == SessionStatus.ACTIVE:
-        session_row.status = SessionStatus.REVOKED
-        session_row.revoked_at = _now()
-        session_row.revoke_reason = "logout"
+        session_crud.revoke(session_row, reason="logout", now=_now())
         await db.commit()

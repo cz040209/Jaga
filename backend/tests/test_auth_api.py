@@ -216,10 +216,13 @@ async def test_logout_revokes_session_and_is_idempotent(
 ) -> None:
     data = await register(client)
     refresh_token = data["tokens"]["refresh_token"]
+    access_token = data["tokens"]["access_token"]
 
     assert (
         await client.post("/auth/logout", json={"refresh_token": refresh_token})
     ).status_code == 204
+    # The access token dies with its session, not 15 minutes later.
+    assert (await client.get("/auth/me", headers=bearer(access_token))).status_code == 401
     assert (
         await client.post("/auth/logout", json={"refresh_token": refresh_token})
     ).status_code == 204

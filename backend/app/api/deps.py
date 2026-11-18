@@ -1,6 +1,8 @@
 """Shared FastAPI dependencies: database session, client info, current customer."""
 
 import ipaddress
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated
 
 import jwt
@@ -9,9 +11,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
-from app.core.security import decode_access_token
-from app.models.enums import CustomerStatus
-from app.models.identity import Customer
+from app.core.security import decode_access_token_claims
+from app.crud import customer as customer_crud
+from app.crud import customer_session as session_crud
+from app.models.enums import CustomerStatus, SessionStatus
+from app.models.identity import Customer, CustomerSession
 from app.services.auth import ClientInfo
 
 DbSession = Annotated[AsyncSession, Depends(get_session)]
@@ -33,34 +37,64 @@ def get_client_info(request: Request) -> ClientInfo:
 Client = Annotated[ClientInfo, Depends(get_client_info)]
 
 
-async def get_current_customer(
-    db: DbSession,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> Customer:
-    unauthorized = HTTPException(
+@dataclass(frozen=True)
+class AuthContext:
+    """The logged-in customer and the session (device login) the request belongs to."""
+
+    customer: Customer
+    session: CustomerSession
+
+
+def _unauthorized() -> HTTPException:
+    return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Not authenticated",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def get_auth_context(
+    db: DbSession,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AuthContext:
     if credentials is None:
-        raise unauthorized
+        raise _unauthorized()
     try:
         # expected_type="customer": a staff token is rejected here.
-        customer_id = decode_access_token(credentials.credentials, "customer")
+        claims = decode_access_token_claims(credentials.credentials, "customer")
     except jwt.InvalidTokenError:
-        raise unauthorized from None
+        raise _unauthorized() from None
+    if claims.session_id is None:
+        raise _unauthorized()
 
-    customer = await db.get(Customer, customer_id)
+    # The session must still be active: logging out a device, changing the
+    # password or the kill switch takes effect on the very next request,
+    # not when the 15-minute access token expires.
+    session_row = await session_crud.get(db, claims.session_id)
+    if (
+        session_row is None
+        or session_row.customer_id != claims.subject_id
+        or session_row.status != SessionStatus.ACTIVE
+        or session_row.expires_at <= datetime.now(UTC)
+    ):
+        raise _unauthorized()
+
+    customer = await customer_crud.get(db, claims.subject_id)
     if customer is None:
-        raise unauthorized
-    # Kill switch: an access token issued before the freeze stops working now,
-    # not 15 minutes from now.
+        raise _unauthorized()
     if customer.status != CustomerStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account is frozen or closed",
         )
-    return customer
+    return AuthContext(customer=customer, session=session_row)
+
+
+CurrentAuth = Annotated[AuthContext, Depends(get_auth_context)]
+
+
+async def get_current_customer(auth: CurrentAuth) -> Customer:
+    return auth.customer
 
 
 CurrentCustomer = Annotated[Customer, Depends(get_current_customer)]

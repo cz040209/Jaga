@@ -1,31 +1,39 @@
-"""Turn service-layer errors into HTTP responses."""
+"""Turn service-layer errors into HTTP responses: {"detail": ..., "code": ...}."""
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.services.auth import (
     AccountNotActive,
-    AuthError,
     DeviceBlocked,
     EmailAlreadyRegistered,
     InvalidCredentials,
     InvalidRefreshToken,
     PhoneAlreadyRegistered,
 )
+from app.services.errors import (
+    InvalidCurrentPassword,
+    NotFound,
+    PasswordUnchanged,
+    ServiceError,
+)
 
-AUTH_ERROR_STATUS: dict[type[AuthError], int] = {
+ERROR_STATUS: dict[type[ServiceError], int] = {
     EmailAlreadyRegistered: status.HTTP_409_CONFLICT,
     PhoneAlreadyRegistered: status.HTTP_409_CONFLICT,
     InvalidCredentials: status.HTTP_401_UNAUTHORIZED,
     InvalidRefreshToken: status.HTTP_401_UNAUTHORIZED,
     AccountNotActive: status.HTTP_403_FORBIDDEN,
     DeviceBlocked: status.HTTP_403_FORBIDDEN,
+    InvalidCurrentPassword: status.HTTP_400_BAD_REQUEST,
+    PasswordUnchanged: status.HTTP_400_BAD_REQUEST,
+    NotFound: status.HTTP_404_NOT_FOUND,
 }
 
 
-async def auth_error_handler(request: Request, exc: Exception) -> JSONResponse:
-    assert isinstance(exc, AuthError)
-    status_code = AUTH_ERROR_STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+async def service_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, ServiceError)
+    status_code = ERROR_STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
     headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
     return JSONResponse(
         status_code=status_code,
@@ -35,4 +43,4 @@ async def auth_error_handler(request: Request, exc: Exception) -> JSONResponse:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    app.add_exception_handler(AuthError, auth_error_handler)
+    app.add_exception_handler(ServiceError, service_error_handler)

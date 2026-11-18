@@ -4,6 +4,7 @@ import pytest
 from app.core.security import (
     create_access_token,
     decode_access_token,
+    decode_access_token_claims,
     hash_password,
     hash_refresh_token,
     new_refresh_token,
@@ -26,6 +27,12 @@ def test_same_password_gives_different_hashes():
 def test_access_token_roundtrip():
     token = create_access_token(42, "customer")
     assert decode_access_token(token, "customer") == 42
+
+
+def test_access_token_carries_session_id():
+    token = create_access_token(42, "customer", session_id=7)
+    claims = decode_access_token_claims(token, "customer")
+    assert (claims.subject_id, claims.session_id) == (42, 7)
 
 
 def test_customer_token_rejected_for_staff():
