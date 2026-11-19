@@ -19,6 +19,7 @@ from app.services.errors import (
     PasswordUnchanged,
     ServiceError,
 )
+from app.services.payees import InvalidAccountNumber, OwnAccount, PayeeAlreadyExists
 
 ERROR_STATUS: dict[type[ServiceError], int] = {
     EmailAlreadyRegistered: status.HTTP_409_CONFLICT,
@@ -34,12 +35,19 @@ ERROR_STATUS: dict[type[ServiceError], int] = {
     InsufficientFunds: status.HTTP_409_CONFLICT,
     AccountUnavailable: status.HTTP_409_CONFLICT,
     InvalidAmount: status.HTTP_400_BAD_REQUEST,
+    InvalidAccountNumber: status.HTTP_400_BAD_REQUEST,
+    OwnAccount: status.HTTP_400_BAD_REQUEST,
+    PayeeAlreadyExists: status.HTTP_409_CONFLICT,
 }
 
 
 async def service_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ServiceError)
-    status_code = ERROR_STATUS.get(type(exc), status.HTTP_400_BAD_REQUEST)
+    # Walk up the class tree, so e.g. AccountNotFound gets NotFound's 404.
+    status_code = next(
+        (ERROR_STATUS[cls] for cls in type(exc).__mro__ if cls in ERROR_STATUS),
+        status.HTTP_400_BAD_REQUEST,
+    )
     headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
     return JSONResponse(
         status_code=status_code,

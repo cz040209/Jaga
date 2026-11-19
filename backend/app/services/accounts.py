@@ -8,10 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.crud import account as account_crud
+from app.crud import ledger as ledger_crud
+from app.crud.ledger import HistoryRow
 from app.ledger import service as ledger
 from app.models.banking import BankAccount
 from app.models.enums import Channel, TransactionType
 from app.models.identity import Customer
+from app.services.errors import AccountNotFound
 
 ACCOUNT_NUMBER_PREFIX = "88"  # every Jaga account number starts with 88
 OPENING_BALANCE_KEY = "opening-balance"
@@ -108,3 +111,48 @@ async def list_accounts(db: AsyncSession, customer_id: int) -> list[AccountWithB
     accounts = await account_crud.list_for_customer(db, customer_id)
     totals = await account_crud.balances(db, [a.id for a in accounts])
     return [AccountWithBalance(account=a, balance=totals[a.id]) for a in accounts]
+
+
+@dataclass(frozen=True)
+class HistoryPage:
+    account: BankAccount
+    rows: list[HistoryRow]
+    next_cursor: int | None  # pass back as `before` to get the next (older) page
+
+
+async def get_own_account(
+    db: AsyncSession, customer_id: int, account_id: int | None = None
+) -> BankAccount:
+    """The customer's account with this id, or their primary account if no id is given.
+
+    Someone else's account id gets the same 404 as one that doesn't exist.
+    """
+    accounts = await account_crud.list_for_customer(db, customer_id)  # primary first
+    if account_id is None:
+        if not accounts:
+            raise AccountNotFound()
+        return accounts[0]
+    for account in accounts:
+        if account.id == account_id:
+            return account
+    raise AccountNotFound()
+
+
+async def list_transactions(
+    db: AsyncSession,
+    customer_id: int,
+    *,
+    account_id: int | None,
+    limit: int,
+    before: int | None,
+) -> HistoryPage:
+    account = await get_own_account(db, customer_id, account_id)
+    # Ask for one extra row: if it comes back, there is another page.
+    rows = await ledger_crud.history(db, account.id, limit=limit + 1, before_entry_id=before)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return HistoryPage(
+        account=account,
+        rows=rows,
+        next_cursor=rows[-1].entry_id if has_more else None,
+    )

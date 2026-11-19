@@ -56,6 +56,12 @@ async def list_for_customer(db: AsyncSession, customer_id: int) -> Sequence[Bank
     return result.all()
 
 
+async def get_by_number(db: AsyncSession, account_number: str) -> BankAccount | None:
+    return await db.scalar(
+        select(BankAccount).where(BankAccount.account_number == account_number)
+    )
+
+
 async def account_number_exists(db: AsyncSession, account_number: str) -> bool:
     found = await db.scalar(
         select(BankAccount.id).where(BankAccount.account_number == account_number)

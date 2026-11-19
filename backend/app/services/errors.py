@@ -20,6 +20,11 @@ class NotFound(ServiceError):
     message = "Not found"
 
 
+class AccountNotFound(NotFound):
+    code = "account_not_found"
+    message = "Account not found"
+
+
 class InvalidCurrentPassword(ServiceError):
     code = "invalid_password"
     message = "Your password is incorrect"

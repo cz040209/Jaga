@@ -185,7 +185,7 @@ class MerchantQRCode(
     )
 
 
-class Payee(Base, IntegerPrimaryKeyMixin, TimestampMixin):
+class Payee(Base, IntegerPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "payees"
 
     customer_id: Mapped[int] = mapped_column(
@@ -214,9 +214,6 @@ class Payee(Base, IntegerPrimaryKeyMixin, TimestampMixin):
     cooling_off_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
 
     __table_args__ = (
         Index(
@@ -229,7 +226,7 @@ class Payee(Base, IntegerPrimaryKeyMixin, TimestampMixin):
             "customer_id",
             "target_account_id",
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=NOT_DELETED,
         ),
     )
 

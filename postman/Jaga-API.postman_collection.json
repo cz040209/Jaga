@@ -46,6 +46,14 @@
     {
       "key": "deviceId",
       "value": ""
+    },
+    {
+      "key": "payeeAccountNumber",
+      "value": ""
+    },
+    {
+      "key": "payeeId",
+      "value": ""
     }
   ],
   "item": [
@@ -314,6 +322,263 @@
               ]
             },
             "description": "Your open accounts, primary first. A new customer starts with RM 10,000.00 from JAGA-TREASURY."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/accounts/me/transactions?limit=20&before=",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "me",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "before",
+                  "value": "",
+                  "disabled": true,
+                  "description": "next_cursor from the previous page"
+                }
+              ]
+            },
+            "description": "Your statement, newest first, with balance_after on each line. For older lines, enable `before` and set it to next_cursor."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Payees",
+      "description": "Saved recipients. Lookup creates a second customer to use as the recipient.",
+      "item": [
+        {
+          "name": "Lookup",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payees/lookup?account_number={{payeeAccountNumber}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payees",
+                "lookup"
+              ],
+              "query": [
+                {
+                  "key": "account_number",
+                  "value": "{{payeeAccountNumber}}"
+                }
+              ]
+            },
+            "description": "Check an account number before saving: returns the owner's masked name."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A payee must be someone else's account, so register a second customer",
+                  "// (the recipient) and save their account number for Lookup and Add.",
+                  "const base = pm.variables.get('base_url');",
+                  "const digits = String(Math.floor(Math.random() * 1e7)).padStart(7, '0');",
+                  "pm.sendRequest({",
+                  "    url: `${base}/auth/register`,",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: JSON.stringify({",
+                  "        full_name: 'Ali bin Abu Bakar',",
+                  "        email: `ali+${Date.now()}@jaga.my`,",
+                  "        phone_number: `013${digits}`,",
+                  "        password: 'S3cure-pass!'",
+                  "    }) }",
+                  "}, (err, res) => {",
+                  "    const token = res.json().tokens.access_token;",
+                  "    pm.sendRequest({",
+                  "        url: `${base}/accounts/me`,",
+                  "        header: { Authorization: `Bearer ${token}` }",
+                  "    }, (err2, res2) => {",
+                  "        pm.collectionVariables.set('payeeAccountNumber', res2.json()[0].account_number);",
+                  "    });",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/payees",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payees"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"account_number\": \"{{payeeAccountNumber}}\",\n  \"nickname\": \"Ali (housemate)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Save a payee. 409 if already saved."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);",
+                  "pm.collectionVariables.set('payeeId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payees",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payees"
+              ]
+            },
+            "description": "Your payees, A to Z."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rename",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/payees/{{payeeId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payees",
+                "{{payeeId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nickname\": \"Ali (gym)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Change a payee's nickname."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/payees/{{payeeId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "payees",
+                "{{payeeId}}"
+              ]
+            },
+            "description": "Soft delete: hidden, but past transfers keep pointing at it."
           },
           "event": [
             {
