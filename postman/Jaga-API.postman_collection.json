@@ -381,7 +381,7 @@
     },
     {
       "name": "Payees",
-      "description": "Saved recipients. Lookup creates a second customer to use as the recipient.",
+      "description": "Saved recipients. The first Lookup creates a second customer (\"Ali\") to use as the recipient; later runs reuse him.",
       "item": [
         {
           "name": "Lookup",
@@ -412,8 +412,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// A payee must be someone else's account, so register a second customer",
-                  "// (the recipient) and save their account number for Lookup and Add.",
+                  "// A payee must be someone else's account. The first time, register a second",
+                  "// customer (the recipient \"Ali\") and remember his account number.",
+                  "// Later clicks reuse the same Ali. To get a new one, clear payeeAccountNumber",
+                  "// in the collection's Variables tab.",
+                  "if (pm.collectionVariables.get('payeeAccountNumber')) {",
+                  "    return;",
+                  "}",
                   "const base = pm.variables.get('base_url');",
                   "const digits = String(Math.floor(Math.random() * 1e7)).padStart(7, '0');",
                   "pm.sendRequest({",
