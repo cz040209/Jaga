@@ -3,6 +3,7 @@
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from app.ledger.service import AccountUnavailable, InsufficientFunds, InvalidAmount
 from app.services.auth import (
     AccountNotActive,
     DeviceBlocked,
@@ -12,6 +13,7 @@ from app.services.auth import (
     PhoneAlreadyRegistered,
 )
 from app.services.errors import (
+    BalanceNotZero,
     InvalidCurrentPassword,
     NotFound,
     PasswordUnchanged,
@@ -28,6 +30,10 @@ ERROR_STATUS: dict[type[ServiceError], int] = {
     InvalidCurrentPassword: status.HTTP_400_BAD_REQUEST,
     PasswordUnchanged: status.HTTP_400_BAD_REQUEST,
     NotFound: status.HTTP_404_NOT_FOUND,
+    BalanceNotZero: status.HTTP_409_CONFLICT,
+    InsufficientFunds: status.HTTP_409_CONFLICT,
+    AccountUnavailable: status.HTTP_409_CONFLICT,
+    InvalidAmount: status.HTTP_400_BAD_REQUEST,
 }
 
 

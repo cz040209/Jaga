@@ -32,6 +32,7 @@ from app.crud import login_event as login_event_crud
 from app.models.enums import CustomerStatus, DeviceTrustStatus, SessionStatus
 from app.models.identity import Customer, CustomerSession, Device
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
+from app.services import accounts as account_service
 from app.services.errors import ServiceError
 
 
@@ -188,6 +189,10 @@ async def register(db: AsyncSession, data: RegisterRequest, client: ClientInfo) 
         if "phone" in str(exc.orig):
             raise PhoneAlreadyRegistered() from exc
         raise EmailAlreadyRegistered() from exc
+
+    # New savings account + RM 10,000 from JAGA-TREASURY. Same transaction as
+    # everything else here: if any step fails, none of it is saved.
+    await account_service.open_primary_account(db, customer)
 
     device, is_new_device = await _resolve_device(db, customer.id, data.device_fingerprint, client)
     session_row, tokens = await _open_session(db, customer, device, client)

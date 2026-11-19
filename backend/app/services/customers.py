@@ -9,13 +9,19 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password_async, verify_password_async
+from app.crud import account as account_crud
 from app.crud import customer as customer_crud
 from app.crud import customer_session as session_crud
 from app.crud import device as device_crud
 from app.models.enums import SessionStatus
 from app.models.identity import Customer, CustomerSession, Device
 from app.schemas.customer import ChangePasswordRequest, CustomerUpdate
-from app.services.errors import InvalidCurrentPassword, NotFound, PasswordUnchanged
+from app.services.errors import (
+    BalanceNotZero,
+    InvalidCurrentPassword,
+    NotFound,
+    PasswordUnchanged,
+)
 
 
 def _now() -> datetime:
@@ -65,11 +71,24 @@ async def change_password(
 
 
 async def close_account(db: AsyncSession, customer: Customer, password: str) -> None:
-    """Soft delete: status 'closed', every session revoked, data kept for audit."""
+    """Soft delete: status 'closed', every session revoked, data kept for audit.
+
+    Every account must be at RM 0.00 first (move the money out), otherwise
+    closing would make that money vanish from the customer's point of view.
+    """
     if not await verify_password_async(password, customer.password_hash):
         raise InvalidCurrentPassword()
 
+    accounts = await account_crud.list_for_customer(db, customer.id)
+    # Lock first: no transfer can land between the balance check and closing.
+    await account_crud.lock_many(db, [a.id for a in accounts])
+    balances = await account_crud.balances(db, [a.id for a in accounts])
+    if any(amount != 0 for amount in balances.values()):
+        raise BalanceNotZero()
+
     now = _now()
+    for account in accounts:
+        account_crud.close(account, now)
     customer_crud.close(customer, now)
     await session_crud.revoke_all_for_customer(db, customer.id, reason="account_closed", now=now)
     await db.commit()

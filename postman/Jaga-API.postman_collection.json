@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Jaga API",
-    "description": "**Start the API:** `cd backend && uv run uvicorn app.main:app --reload --port 8010`\n\n**First:** send **Auth \u2192 Register**, then **Auth \u2192 Login**. Tokens and ids are saved automatically, so every other request just works.\n\nEdge cases (wrong password, 401/403/404/409...) are covered by the automated tests in `backend/tests` (`uv run pytest`).",
+    "description": "**Start the API:** `cd backend && uv run uvicorn app.main:app --reload --port 8010`\n\n**First:** send **Auth → Register**, then **Auth → Login**. Tokens and ids are saved automatically, so every other request just works.\n\nEdge cases (wrong password, 401/403/404/409...) are covered by the automated tests in `backend/tests` (`uv run pytest`).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -295,6 +295,41 @@
       ]
     },
     {
+      "name": "Accounts",
+      "description": "Your bank accounts. Balance is worked out from the ledger; money is a string (\"10000.00\").",
+      "item": [
+        {
+          "name": "Get",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/accounts/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "accounts",
+                "me"
+              ]
+            },
+            "description": "Your open accounts, primary first. A new customer starts with RM 10,000.00 from JAGA-TREASURY."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Profile",
       "description": "/customers/me",
       "item": [
@@ -435,7 +470,7 @@
                 "me"
               ]
             },
-            "description": "Soft delete: the account can't be used again. Requires the password.",
+            "description": "Soft delete: the account can't be used again. Requires the password. Refused with 409 balance_not_zero while the account still holds money, which is always the case for a fresh customer until transfers exist.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"password\": \"{{password}}\"\n}",
@@ -452,7 +487,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('success', () => pm.response.to.be.success);"
+                  "pm.test('closed, or refused because money is left', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([204, 409]);",
+                  "});"
                 ]
               }
             }

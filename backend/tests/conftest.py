@@ -72,6 +72,14 @@ async def _truncate_all_tables() -> None:
         ).scalars().all()
         quoted = ", ".join(f'"{table}"' for table in tables)
         await conn.execute(text(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE"))
+        # TRUNCATE also wiped the Treasury that migration 0009 seeded; put it back.
+        await conn.execute(
+            text(
+                "INSERT INTO bank_accounts (customer_id, account_number, account_name, "
+                "account_type, status, currency, is_primary) "
+                "VALUES (NULL, 'JAGA-TREASURY', 'Jaga Treasury', 'system', 'active', 'MYR', false)"
+            )
+        )
 
 
 @pytest.fixture

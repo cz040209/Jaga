@@ -28,3 +28,8 @@ class InvalidCurrentPassword(ServiceError):
 class PasswordUnchanged(ServiceError):
     code = "password_unchanged"
     message = "Your new password must be different from the current one"
+
+
+class BalanceNotZero(ServiceError):
+    code = "balance_not_zero"
+    message = "Move all your money out before closing your account"

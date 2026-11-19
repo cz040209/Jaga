@@ -6,7 +6,16 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import CustomerStatus, SessionStatus
+from app.crud import account as account_crud
+from app.ledger import service as ledger
+from app.models.banking import BankAccount
+from app.models.enums import (
+    AccountStatus,
+    Channel,
+    CustomerStatus,
+    SessionStatus,
+    TransactionType,
+)
 from app.models.identity import Customer, CustomerSession, Device
 
 PASSWORD = "S3cure-pass!"
@@ -280,6 +289,23 @@ async def test_forget_device_is_a_soft_delete(client: AsyncClient, db: AsyncSess
 
 
 # ---------- Close account ----------
+async def _empty_account(db: AsyncSession, customer_id: int) -> None:
+    """Move all the money back to the Treasury (stands in for transfers, which come later)."""
+    account = (await account_crud.list_for_customer(db, customer_id))[0]
+    treasury = await account_crud.get_treasury(db)
+    assert treasury is not None
+    await ledger.transfer(
+        db,
+        source_account_id=account.id,
+        destination_account_id=treasury.id,
+        amount=await account_crud.balance(db, account.id),
+        transaction_type=TransactionType.ADJUSTMENT,
+        channel=Channel.SYSTEM,
+        idempotency_key="test-empty-account",
+    )
+    await db.commit()
+
+
 async def test_close_account(client: AsyncClient, db: AsyncSession) -> None:
     phone, laptop = await two_devices(client)
 
@@ -287,6 +313,22 @@ async def test_close_account(client: AsyncClient, db: AsyncSession) -> None:
         "DELETE", "/customers/me", headers=bearer(phone["access_token"]), json={"password": "no"}
     )
     assert wrong.status_code == 400
+
+    # Still holding RM 10,000: refused, nothing changes.
+    not_empty = await client.request(
+        "DELETE",
+        "/customers/me",
+        headers=bearer(phone["access_token"]),
+        json={"password": PASSWORD},
+    )
+    assert not_empty.status_code == 409
+    assert not_empty.json()["code"] == "balance_not_zero"
+    assert (
+        await client.get("/customers/me", headers=bearer(phone["access_token"]))
+    ).status_code == 200
+
+    me = (await client.get("/customers/me", headers=bearer(phone["access_token"]))).json()
+    await _empty_account(db, me["id"])
 
     closed = await client.request(
         "DELETE",
@@ -296,9 +338,12 @@ async def test_close_account(client: AsyncClient, db: AsyncSession) -> None:
     )
     assert closed.status_code == 204
 
+    db.expire_all()  # this session loaded the account earlier; re-read what the API wrote
     customer = await db.scalar(select(Customer))
     assert customer is not None and customer.status == CustomerStatus.CLOSED
     assert customer.closed_at is not None  # soft delete: row kept for audit
+    account = await db.scalar(select(BankAccount).where(BankAccount.customer_id == customer.id))
+    assert account is not None and account.status == AccountStatus.CLOSED
     statuses = set((await db.scalars(select(CustomerSession.status))).all())
     assert statuses == {SessionStatus.REVOKED}
 

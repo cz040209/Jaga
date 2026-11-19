@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from app.api import auth, customers
+from app.api import accounts, auth, customers
 from app.api.errors import register_exception_handlers
 from app.core.cache import redis_client
 from app.core.config import settings
@@ -21,6 +21,7 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 register_exception_handlers(app)
 app.include_router(auth.router)
 app.include_router(customers.router)
+app.include_router(accounts.router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
