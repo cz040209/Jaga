@@ -18,6 +18,11 @@ LIVE = Payee.deleted_at.is_(None)
 
 
 # ---------- Read ----------
+async def get_including_deleted(db: AsyncSession, payee_id: int) -> Payee | None:
+    """For receipts: a transfer still shows the payee's nickname after it's removed."""
+    return await db.get(Payee, payee_id)
+
+
 async def get_for_customer(
     db: AsyncSession, customer_id: int, payee_id: int
 ) -> tuple[Payee, BankAccount] | None:

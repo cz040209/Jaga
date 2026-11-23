@@ -131,6 +131,8 @@ async def post_transaction(
     idempotency_key: str,
     initiated_by_customer_id: int | None = None,
     description: str | None = None,
+    payee_id: int | None = None,
+    customer_reference: str | None = None,
 ) -> Transaction:
     """Post a balanced set of ledger entries as one transaction. Does NOT commit."""
     amount = check_amount(amount)
@@ -172,6 +174,8 @@ async def post_transaction(
         initiated_by_customer_id=initiated_by_customer_id,
         description=description,
         now=now,
+        payee_id=payee_id,
+        customer_reference=customer_reference,
     )
     ledger_crud.add_entries(
         db,
@@ -194,6 +198,8 @@ async def transfer(
     idempotency_key: str,
     initiated_by_customer_id: int | None = None,
     description: str | None = None,
+    payee_id: int | None = None,
+    customer_reference: str | None = None,
 ) -> Transaction:
     """The common case: debit one account, credit another. Does NOT commit."""
     if source_account_id == destination_account_id:
@@ -213,4 +219,6 @@ async def transfer(
         idempotency_key=idempotency_key,
         initiated_by_customer_id=initiated_by_customer_id,
         description=description,
+        payee_id=payee_id,
+        customer_reference=customer_reference,
     )

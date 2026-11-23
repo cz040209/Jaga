@@ -106,7 +106,7 @@ async def balances(db: AsyncSession, account_ids: Sequence[int]) -> dict[int, De
     )
     found = {account_id: total for account_id, total in rows}
     return {
-        account_id: Decimal(found.get(account_id) or 0).quantize(CENTS)
+        account_id: Decimal(found.get(account_id, 0)).quantize(CENTS)
         for account_id in account_ids
     }
 

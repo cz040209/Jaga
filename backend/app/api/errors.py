@@ -20,6 +20,7 @@ from app.services.errors import (
     ServiceError,
 )
 from app.services.payees import InvalidAccountNumber, OwnAccount, PayeeAlreadyExists
+from app.services.transfers import IdempotencyKeyReused
 
 ERROR_STATUS: dict[type[ServiceError], int] = {
     EmailAlreadyRegistered: status.HTTP_409_CONFLICT,
@@ -38,6 +39,7 @@ ERROR_STATUS: dict[type[ServiceError], int] = {
     InvalidAccountNumber: status.HTTP_400_BAD_REQUEST,
     OwnAccount: status.HTTP_400_BAD_REQUEST,
     PayeeAlreadyExists: status.HTTP_409_CONFLICT,
+    IdempotencyKeyReused: status.HTTP_409_CONFLICT,
 }
 
 

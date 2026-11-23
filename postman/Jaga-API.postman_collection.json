@@ -54,6 +54,14 @@
     {
       "key": "payeeId",
       "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "transferId",
+      "value": ""
     }
   ],
   "item": [
@@ -584,6 +592,166 @@
               ]
             },
             "description": "Soft delete: hidden, but past transfers keep pointing at it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Transfers",
+      "description": "Send money to a payee. Run Payees > Lookup once first, so there is a recipient.",
+      "item": [
+        {
+          "name": "Send",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}",
+                "description": "New value per transfer"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/transfers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payee_id\": {{payeeId}},\n  \"amount\": \"50.00\",\n  \"note\": \"Makan\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Sends RM 50.00 to your payee. 201 with a receipt; balance_after is your new balance."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A new Idempotency-Key for every new transfer (the app makes one per 'Send' tap).",
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));",
+                  "",
+                  "// Make sure {{payeeId}} is a live payee: reuse it, or re-add Ali if it was removed.",
+                  "const base = pm.variables.get('base_url');",
+                  "const auth = { Authorization: `Bearer ${pm.collectionVariables.get('accessToken')}` };",
+                  "pm.sendRequest({ url: `${base}/payees`, header: auth }, (err, res) => {",
+                  "    const payees = res.code === 200 ? res.json() : [];",
+                  "    const wanted = String(pm.collectionVariables.get('payeeId'));",
+                  "    if (payees.some(p => String(p.id) === wanted)) return;",
+                  "    if (payees.length) {",
+                  "        pm.collectionVariables.set('payeeId', payees[0].id);",
+                  "        return;",
+                  "    }",
+                  "    const number = pm.collectionVariables.get('payeeAccountNumber');",
+                  "    if (!number) return; // run Payees > Lookup once first",
+                  "    pm.sendRequest({",
+                  "        url: `${base}/payees`, method: 'POST',",
+                  "        header: { ...auth, 'Content-Type': 'application/json' },",
+                  "        body: { mode: 'raw', raw: JSON.stringify({ account_number: number, nickname: 'Ali (housemate)' }) }",
+                  "    }, (err2, res2) => pm.collectionVariables.set('payeeId', res2.json().id));",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);",
+                  "pm.collectionVariables.set('transferId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replay",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}",
+                "description": "SAME key as Send"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/transfers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payee_id\": {{payeeId}},\n  \"amount\": \"50.00\",\n  \"note\": \"Makan\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "The exact same request with the SAME Idempotency-Key, like a double-tap. Returns 200 with the original transfer (header Idempotent-Replayed: true); no money moves again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Receipt",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/transfers/{{transferId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "transfers",
+                "{{transferId}}"
+              ]
+            },
+            "description": "The receipt of the last transfer. Works for the sender and the recipient."
           },
           "event": [
             {

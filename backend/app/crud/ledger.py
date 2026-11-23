@@ -44,6 +44,8 @@ async def create_posted_transaction(
     initiated_by_customer_id: int | None,
     description: str | None,
     now: datetime,
+    payee_id: int | None = None,
+    customer_reference: str | None = None,
 ) -> Transaction:
     transaction = Transaction(
         reference=reference,
@@ -54,9 +56,11 @@ async def create_posted_transaction(
         initiated_by_customer_id=initiated_by_customer_id,
         source_account_id=source_account_id,
         destination_account_id=destination_account_id,
+        payee_id=payee_id,
         amount=amount,
         currency="MYR",
         description=description,
+        customer_reference=customer_reference,
         initiated_at=now,
         posted_at=now,
     )
@@ -88,6 +92,18 @@ def add_entries(
     ]
     db.add_all(rows)
     return rows
+
+
+CENTS = Decimal("0.01")
+
+
+def _money(value: object) -> Decimal:
+    """DB result -> Decimal with exactly 2 places.
+
+    Careful: `value or 0` would be a bug, because Decimal("0.00") is falsy,
+    so a balance of exactly zero would turn into 0 and print as "0".
+    """
+    return Decimal(0 if value is None else str(value)).quantize(CENTS)
 
 
 # ---------- Read ----------
@@ -158,7 +174,7 @@ async def history(
             entry_id=entry.id,
             direction=entry.direction,
             amount=entry.amount,
-            balance_after=Decimal(balance_after),
+            balance_after=_money(balance_after),
             transaction_id=txn.id,
             reference=txn.reference,
             transaction_type=txn.transaction_type,
@@ -173,7 +189,41 @@ async def history(
     ]
 
 
+async def get_transaction(db: AsyncSession, transaction_id: int) -> Transaction | None:
+    return await db.get(Transaction, transaction_id)
+
+
+async def get_by_idempotency_key(
+    db: AsyncSession, customer_id: int, idempotency_key: str
+) -> Transaction | None:
+    """Uses uq_transactions_customer_idempotency, so it's a single index lookup."""
+    return await db.scalar(
+        select(Transaction).where(
+            Transaction.initiated_by_customer_id == customer_id,
+            Transaction.idempotency_key == idempotency_key,
+        )
+    )
+
+
+async def balance_after(db: AsyncSession, account_id: int, transaction_id: int) -> Decimal:
+    """The account's balance right after this transaction's line on it."""
+    entry_id = (
+        select(LedgerEntry.id)
+        .where(
+            LedgerEntry.transaction_id == transaction_id,
+            LedgerEntry.account_id == account_id,
+        )
+        .scalar_subquery()
+    )
+    total = await db.scalar(
+        select(func.coalesce(func.sum(SIGNED_AMOUNT), 0)).where(
+            LedgerEntry.account_id == account_id, LedgerEntry.id <= entry_id
+        )
+    )
+    return _money(total)
+
+
 async def system_total(db: AsyncSession) -> Decimal:
     """Credits minus debits across EVERY account. Double-entry means this is always 0."""
     total = await db.scalar(select(func.coalesce(func.sum(SIGNED_AMOUNT), 0)))
-    return Decimal(total or 0)
+    return _money(total)
