@@ -62,6 +62,10 @@
     {
       "key": "transferId",
       "value": ""
+    },
+    {
+      "key": "messageId",
+      "value": ""
     }
   ],
   "item": [
@@ -752,6 +756,107 @@
               ]
             },
             "description": "The receipt of the last transfer. Works for the sender and the recipient."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Inbox",
+      "description": "The in-app SMS inbox: welcome, transfer and security messages.",
+      "item": [
+        {
+          "name": "List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/inbox?limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "inbox"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Your messages, newest first, with unread_count for the badge."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);",
+                  "const items = pm.response.json().items;",
+                  "if (items.length) pm.collectionVariables.set('messageId', items[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/inbox/{{messageId}}/read",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "inbox",
+                "{{messageId}}",
+                "read"
+              ]
+            },
+            "description": "Mark one message as read (the newest one from List)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('success', () => pm.response.to.be.success);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read all",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/inbox/read-all",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "inbox",
+                "read-all"
+              ]
+            },
+            "description": "Mark every unread message as read. Returns how many changed."
           },
           "event": [
             {

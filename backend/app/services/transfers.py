@@ -8,7 +8,9 @@ Flow of send_transfer():
 3. Risk decision. Phase 1 always approves; Phase 2 plugs the real-time
    fraud engine in here (APPROVE / STEP-UP / HOLD / BLOCK).
 4. Move the money with the ledger (locks, balance check, double entry).
-5. Commit once: either the whole transfer is saved, or nothing is.
+5. Tell both people (in-app inbox now; Telegram / Web Push later).
+6. Commit once: the money, the ledger lines and both messages are saved
+   together, or nothing is. No "money sent" message for a failed transfer.
 """
 
 from dataclasses import dataclass
@@ -18,12 +20,15 @@ from typing import Literal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.masking import mask_name
 from app.crud import account as account_crud
+from app.crud import customer as customer_crud
 from app.crud import ledger as ledger_crud
 from app.crud import payee as payee_crud
 from app.ledger import service as ledger
 from app.models.banking import BankAccount, Payee, Transaction
 from app.models.enums import Channel, DecisionAction, TransactionType
+from app.notify import Event, format_amount, format_time, notify
 from app.services.accounts import get_own_account
 from app.services.errors import NotFound, ServiceError
 from app.services.payees import PayeeNotFound
@@ -129,7 +134,7 @@ async def send_transfer(
     if decision != DecisionAction.APPROVE:  # pragma: no cover - Phase 2
         raise NotImplementedError(f"Decision {decision} is handled from Phase 2")
 
-    # 4 + 5. Move the money, then commit everything in one go.
+    # 4-6. Move the money, queue the messages, then commit everything in one go.
     try:
         transaction = await ledger.transfer(
             db,
@@ -145,6 +150,7 @@ async def send_transfer(
             customer_reference=note,
         )
         transaction_id = transaction.id
+        await _notify_both_sides(db, transaction, source=source, target=target)
         await db.commit()
     except IntegrityError:
         # The same key arrived twice at the same moment (double-tap): both
@@ -161,6 +167,35 @@ async def send_transfer(
 
     receipt = await get_receipt(db, customer_id, transaction_id)
     return SendResult(receipt=receipt, replayed=False)
+
+
+async def _notify_both_sides(
+    db: AsyncSession, transaction: Transaction, *, source: BankAccount, target: BankAccount
+) -> None:
+    """'RM 50.00 sent to Ali b**' for the sender, 'You received ...' for the recipient."""
+    common = {
+        "amount": format_amount(transaction.amount),
+        "reference": transaction.reference,
+        "time": format_time(transaction.posted_at or transaction.initiated_at),
+    }
+    sender = await customer_crud.get(db, source.customer_id) if source.customer_id else None
+    recipient = await customer_crud.get(db, target.customer_id) if target.customer_id else None
+    if sender is not None:
+        await notify(
+            db,
+            sender,
+            Event.TRANSFER_SENT,
+            {**common, "recipient": mask_name(target.account_name)},
+            transaction_id=transaction.id,
+        )
+    if recipient is not None:
+        await notify(
+            db,
+            recipient,
+            Event.TRANSFER_RECEIVED,
+            {**common, "sender": mask_name(source.account_name)},
+            transaction_id=transaction.id,
+        )
 
 
 async def _replay(

@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.masking import mask_account_number
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -31,6 +32,7 @@ from app.crud import device as device_crud
 from app.crud import login_event as login_event_crud
 from app.models.enums import CustomerStatus, DeviceTrustStatus, SessionStatus
 from app.models.identity import Customer, CustomerSession, Device
+from app.notify import Event, format_amount, format_time, notify
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
 from app.services import accounts as account_service
 from app.services.errors import ServiceError
@@ -192,7 +194,17 @@ async def register(db: AsyncSession, data: RegisterRequest, client: ClientInfo) 
 
     # New savings account + RM 10,000 from JAGA-TREASURY. Same transaction as
     # everything else here: if any step fails, none of it is saved.
-    await account_service.open_primary_account(db, customer)
+    account = await account_service.open_primary_account(db, customer)
+    await notify(
+        db,
+        customer,
+        Event.WELCOME,
+        {
+            "name": customer.full_name,
+            "account": mask_account_number(account.account_number),
+            "amount": format_amount(settings.opening_balance),
+        },
+    )
 
     device, is_new_device = await _resolve_device(db, customer.id, data.device_fingerprint, client)
     session_row, tokens = await _open_session(db, customer, device, client)
@@ -282,6 +294,10 @@ async def login(db: AsyncSession, data: LoginRequest, client: ClientInfo) -> Aut
         session_id=session_row.id,
         is_new_device=is_new_device,
     )
+    if is_new_device:
+        # A login from an unknown device is the first step of most account
+        # takeovers, so the real owner hears about it straight away.
+        await notify(db, customer, Event.NEW_DEVICE_LOGIN, {"time": format_time(_now())})
     await db.commit()
     await db.refresh(customer)
     return AuthResult(customer=customer, tokens=tokens, is_new_device=is_new_device)

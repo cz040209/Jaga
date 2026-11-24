@@ -15,6 +15,7 @@ from app.crud import customer_session as session_crud
 from app.crud import device as device_crud
 from app.models.enums import SessionStatus
 from app.models.identity import Customer, CustomerSession, Device
+from app.notify import Event, format_time, notify
 from app.schemas.customer import ChangePasswordRequest, CustomerUpdate
 from app.services.errors import (
     BalanceNotZero,
@@ -66,6 +67,7 @@ async def change_password(
         now=now,
         except_session_id=current_session_id,
     )
+    await notify(db, customer, Event.PASSWORD_CHANGED, {"time": format_time(now)})
     await db.commit()
     return revoked
 
