@@ -5,6 +5,8 @@ import { MotionConfig } from "framer-motion";
 import { useState } from "react";
 import { Toaster } from "sonner";
 
+import { OfflineBanner } from "@/components/pwa/OfflineBanner";
+import { ServiceWorker } from "@/components/pwa/ServiceWorker";
 import { ThemeProvider, useTheme } from "@/components/theme/ThemeProvider";
 import { AuthProvider } from "@/features/auth/AuthProvider";
 import { ApiError } from "@/lib/api/errors";
@@ -46,6 +48,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
           <AuthProvider>{children}</AuthProvider>
         </MotionConfig>
         <ThemedToaster />
+        <OfflineBanner />
+        <ServiceWorker />
       </QueryClientProvider>
     </ThemeProvider>
   );

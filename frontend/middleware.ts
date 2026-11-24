@@ -34,5 +34,5 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   // Skip Next.js internals, our auth API and static files.
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icons|manifest.json).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|icons|manifest.webmanifest|sw.js|offline.html).*)"],
 };

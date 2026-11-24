@@ -16,6 +16,11 @@ export const metadata: Metadata = {
   title: { default: "Jaga", template: "%s · Jaga" },
   description: "Jaga: the bank that guards you against scams in real time.",
   applicationName: "Jaga",
+  // iPhone "Add to Home Screen": open full-screen with Jaga's name.
+  // (The icon comes from app/apple-icon.png, the manifest from app/manifest.ts.)
+  appleWebApp: { capable: true, title: "Jaga", statusBarStyle: "default" },
+  // Stop iOS turning account numbers and amounts into "call this number" links.
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
