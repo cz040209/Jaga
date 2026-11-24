@@ -10,7 +10,11 @@
 import { tokenStore } from "@/lib/auth/token-store";
 import { ApiError, networkError, toApiError } from "@/lib/api/errors";
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8010";
+/**
+ * Relative on purpose: calls go to the same address the page came from
+ * (laptop, phone on Wi-Fi, tunnel), and app/api/bank/ forwards them to FastAPI.
+ */
+export const API_URL = "/api/bank";
 
 let refreshing: Promise<string | null> | null = null;
 
