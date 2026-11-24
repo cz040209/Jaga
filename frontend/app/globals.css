@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/*
+ * Jaga design tokens: light (default) and dark.
+ * Light: airy off-white surfaces, calm teal, soft sky/lavender accents.
+ * Dark: deep navy surfaces, brighter teal, the same glass and glow.
+ */
+
+/* `dark:` classes apply inside a `.dark` element. ThemeProvider puts `.dark`
+   on <html> only when the user picks Dark (or System on a dark phone). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+}
+
+:root {
+  --background: #f6f8fa;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --primary: #0d9488;
+  --primary-foreground: #ffffff;
+  --secondary: #e6f6f3;
+  --secondary-foreground: #0f766e;
+  --muted: #f1f5f4;
+  --muted-foreground: #64748b;
+  --border: #e7ecef;
+  --ring: #14b8a6;
+  --destructive: #e11d48;
+
+  /* Soft, layered shadows (modern "lifted" look rather than hard edges). */
+  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px -6px rgb(15 23 42 / 0.08);
+  --shadow-float: 0 2px 6px rgb(15 23 42 / 0.04), 0 20px 48px -12px rgb(15 23 42 / 0.16);
+  --shadow-glow: 0 12px 32px -10px rgb(13 148 136 / 0.55);
+  color-scheme: light;
+}
+
+.dark {
+  --background: #0b1120;
+  --foreground: #e6edf5;
+  --card: #141c2e;
+  --primary: #2dd4bf;
+  --primary-foreground: #04201d;
+  --secondary: #0f2f2e;
+  --secondary-foreground: #5eead4;
+  --muted: #1a2438;
+  --muted-foreground: #94a3b8;
+  --border: #223049;
+  --ring: #2dd4bf;
+  --destructive: #fb7185;
+
+  /* On dark, shadows need more depth and a thin top highlight. */
+  --shadow-soft: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 8px 24px -8px rgb(0 0 0 / 0.5);
+  --shadow-float: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 20px 48px -12px rgb(0 0 0 / 0.65);
+  --shadow-glow: 0 12px 32px -10px rgb(45 212 191 / 0.45);
+  color-scheme: dark;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+  ::selection {
+    background: rgb(20 184 166 / 0.2);
+  }
+}
+
+@layer components {
+  /* Frosted glass: translucent surface, blurred background, hairline border. */
+  .glass {
+    @apply border border-white/70 bg-white/70 backdrop-blur-xl dark:border-white/[0.07] dark:bg-slate-900/55;
+  }
+}
+
+/* Theme switch: the new theme grows as a circle (ThemeProvider animates it),
+   so turn off the browser's default cross-fade. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}

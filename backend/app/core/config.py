@@ -19,4 +19,8 @@ class Settings(BaseSettings):
     # Banking: fake money every new customer starts with (paid from JAGA-TREASURY).
     opening_balance: Decimal = Decimal("10000.00")
 
+    # Web frontends allowed to call the API from a browser (CORS).
+    # In .env as JSON: CORS_ORIGINS=["http://localhost:3010"]
+    cors_origins: list[str] = ["http://localhost:3010"]
+
 settings = Settings()

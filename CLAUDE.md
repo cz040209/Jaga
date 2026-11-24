@@ -385,7 +385,7 @@ Deliver each phase as a working, runnable increment before starting the next.
 
 Phase 1 backend is mostly built: auth and customer self-service, accounts and the double-entry ledger (RM 10,000 opening balance from the `JAGA-TREASURY` system account), transaction history, payees, idempotent transfers, and notifications with the in-app SMS inbox. Migrations are hand-written (`backend/alembic/versions/`), tests are in `backend/tests/`, and a Postman collection is in `postman/`. The frontend (`frontend/`) is scaffolded but not built yet.
 
-Local ports: API `8010`, Postgres `5432`, Redis `6380` (moved off the defaults to avoid clashing with other local projects).
+Local ports: web `3010`, API `8010`, Postgres `5432`, Redis `6380` (moved off the defaults to avoid clashing with other local projects).
 
 ---
 
