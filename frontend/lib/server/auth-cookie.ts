@@ -17,7 +17,12 @@ export async function setRefreshCookie(token: string): Promise<void> {
   (await cookies()).set(REFRESH_COOKIE, token, {
     httpOnly: true,
     sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
+    // Secure = only sent over https. On by default in production, but the
+    // Docker setup runs plain http://localhost (and phones on Wi-Fi), so it
+    // can be switched off with COOKIE_SECURE=false.
+    secure: process.env.COOKIE_SECURE
+      ? process.env.COOKIE_SECURE === "true"
+      : process.env.NODE_ENV === "production",
     path: "/",
     maxAge: THIRTY_DAYS,
   });

@@ -35,7 +35,7 @@ This is a portfolio-grade project meant to look and behave like a real product, 
 ## 2. Core principles (non-negotiable)
 
 ### Product principles
-1. **No fake data shown in the product.** There is no background script generating fake transactions. Every transaction in the app comes from a real person using the mock bank. Fraud is *acted out* by people (or by the sandboxed Red-Team agent), not generated. Public datasets (e.g. PaySim, IEEE-CIS) may be used **only offline to pre-train ML models**, never displayed as activity.
+1. **No fake data shown in the product.** There is no background script generating fake transactions. Every transaction in the app comes from a real person using the mock bank. Fraud is *acted out* by people (or by the sandboxed Red-Team agent), not generated. Training data may be generated or downloaded **only offline to pre-train ML models** (Jaga's own synthetic simulator in `ml/synthetic/`, public datasets such as PaySim / IEEE-CIS); it is never written to the bank's database or displayed as activity.
 2. **Runs fully on a laptop.** All services run locally via Docker Compose. No production server required. The only external paid dependency is the LLM API.
 3. **Works without an LLM API key.** The bank and the real-time engine never depend on agents. Without a key, agents are switched off with a clear message ("AI investigation unavailable") and every screen still works, using detector reasons and templates instead.
 4. **The LLM is never in the real-time path.** Real-time decisions use rules + ML only. Agents run in background jobs or on user request.
@@ -275,18 +275,23 @@ A red team vs. blue team game, played by humans **and agents**:
 
 | # | Feature | Phase |
 |---|---|---|
-| 1 | Fraud classifier (gradient boosting) | 2 |
-| 2 | Per-user anomaly detection | 2 |
-| 3 | Account-takeover detector | 2 |
-| 4 | Scam / coaching pattern detector | 2 |
-| 5 | Mule network detection (graph) | 5 |
-| 6 | Behavioural biometrics (typing rhythm, session speed) | Extra |
-| 7 | Explainability (SHAP reasons) | 5 |
-| 8 | Risk score blending + decision thresholds | 2 |
-| 9 | Model drift monitoring | 6 |
-| 10 | Shadow testing / replay of new models | 6 |
+| 1 | Synthetic training dataset (offline, agent-based simulator) | 2 ✅ v2 generated |
+| 2 | Fraud classifier (XGBoost, calibrated, tracked in MLflow) | 2 |
+| 3 | Explainability (SHAP reasons per decision) | 2 |
+| 4 | Per-user anomaly detection | 2 |
+| 5 | Account-takeover detector | 2 |
+| 6 | Scam / coaching pattern detector | 2 |
+| 7 | Behavioural signals (typing cadence, hesitation, paste, app switches) captured by the frontend | 2 |
+| 8 | Money-flow features (fan-in, pass-through) for the classifier | 2 |
+| 9 | Risk score blending + decision thresholds | 2 |
+| 10 | Mule network detection + ring graph (NetworkX) | 5 |
+| 11 | Retraining on real labels (analysts, customer replies, Scam Arena) | 6 |
+| 12 | Model drift monitoring | 6 |
+| 13 | Shadow testing / replay of new models | 6 |
 
-**ML cold start:** with few real users there is little history. Start with rules + per-user anomaly detection (work from day one), pre-train the classifier offline on a public dataset, then improve it with analyst labels from real usage.
+**ML cold start:** with few real users there is little history and no fraud labels. Rules + per-user anomaly detection work from day one. The classifier is pre-trained offline on Jaga's synthetic dataset (simulated personas and Malaysian scam scenarios: Macau, investment, job and love scams, account takeover, mules, card testing), optionally checked against PaySim, and later retrained on real labels from analysts, customer replies and the Scam Arena.
+
+**Feature contract:** the classifier's 50 features are defined once, in `ml/datasets/jaga_synthetic_v2_dictionary.md` (name, meaning, default when there is no history). The live feature store must compute each feature with exactly that name, meaning and default; the model, its feature list and its thresholds are saved together. A feature whose source arrives in a later phase (e.g. `scam_message_checked_recently` needs the Scam Message Checker, Phase 4) uses its documented default until then.
 
 **LLM cost control:** agents run only on HOLD/BLOCK cases, customer conversations, scam checks, analyst requests and schedules, never per transaction. Use prompt caching for fixed instructions, tool definitions and policies. Per-agent budgets (§5.4). Template fallback without an API key.
 
@@ -358,14 +363,18 @@ New tables are added by hand-written Alembic migrations, following the project's
 
 ## 14. Build phases
 
-| Phase | Scope |
-|---|---|
-| **1: Mock bank** | Auth, accounts, double-entry ledger, payees, transfers, notifications + in-app SMS inbox, customer UI, Docker Compose setup |
-| **2: Real-time engine** | Event stream, feature store, rules engine, anomaly + ATO + scam detectors, decision engine, step-up / hold / block flows, kill switch, device cooling-off |
-| **3: Ops dashboard** | Live feed, cases, case detail, approve/reject, labels, business-impact counter, staff auth and roles |
-| **4: Agent platform + first agents** | Tool registry with permission tiers, agent runtime (in-process), dispatcher, trace store, agent console, approval queue, evaluation harness; **Case Investigator**, **Customer Guardian** (alerts, "why held", freeze on "not me"), **Scam Message Checker**; Telegram bot |
-| **5: Multi-agent** | **Mule Network Analyst** (delegated by the Investigator), **Rules Engineer** with back-test, interactive scam interview, multilingual agents, `jaga-tools` MCP server, Managed Agents runtime for long-running work, fraud classifier + SHAP, mule graph, Telegram Mini App, Scam Arena |
-| **6: Autonomous learning loop** | **Red-Team agent** on a schedule, **Data Analyst**, **Label Assistant**, **Model Ops Monitor** (drift, shadow testing), full red-team → rules → retrain loop, observability |
+This plan is a guide, not a contract: revise it as the project evolves.
+
+| Phase | Scope | Status |
+|---|---|---|
+| **1: Mock bank** | Auth, accounts, double-entry ledger, payees, idempotent transfers, notifications + in-app SMS inbox; customer web app (Next.js) with light/dark theme; `/api/bank` proxy so phones, tunnels and Docker reach the API through one address; PWA (manifest, icons, offline page); Docker Compose (`api` + `web` services, migrations on start) | ✅ Done |
+| **2a: Real-time engine** | Event stream (Redis Streams) + scoring worker; feature store computing the 50 contract features (incl. User-Agent parsing, GeoLite2, behavioural signals sent by the frontend); rules engine (YAML); anomaly, account-takeover and scam/coaching detectors; decision engine (blend → APPROVE / STEP-UP / HOLD / BLOCK) with every decision stored for audit | Next |
+| **2b: Fraud model** | Synthetic dataset (✅ v2 generated); train the XGBoost classifier on a time-based split, calibrate it, track runs in MLflow; **SHAP** reasons for every score; save model + feature list + thresholds; plug it into the engine as one more detector | |
+| **2c: Customer flows** | OTP step-up via the in-app inbox, "Transfer on hold" and "Blocked" screens with plain-language reasons (from detector and SHAP reasons), kill switch (freeze account), new-device cooling-off; scenario tests (§13: 1, 2, 4, 5) and a load test proving p95 < 50 ms | |
+| **3: Ops dashboard** | Staff auth and roles; live feed; case queue and case detail with detector scores and the **SHAP chart**; approve / reject / mark fraud → labels; business-impact counter; model version view | |
+| **4: Agent platform + first agents** | Tool registry with permission tiers, agent runtime (in-process), dispatcher, trace store, agent console, approval queue, evaluation harness; **Case Investigator**, **Customer Guardian** (alerts, "why held", freeze on "not me"), **Scam Message Checker**; Telegram bot | |
+| **5: Multi-agent** | **Mule Network Analyst** (delegated by the Investigator) + mule ring graph (NetworkX, React Flow), **Rules Engineer** with back-test, interactive scam interview, multilingual agents, `jaga-tools` MCP server, Managed Agents runtime for long-running work, Telegram Mini App, Scam Arena | |
+| **6: Autonomous learning loop** | **Red-Team agent** on a schedule, **Data Analyst**, **Label Assistant**, **Model Ops Monitor** (drift, shadow testing); retrain the classifier on real labels (analysts, customer replies, Arena) and promote only if it beats the current model; full red-team → rules → retrain loop; observability | |
 
 Deliver each phase as a working, runnable increment before starting the next.
 
@@ -383,9 +392,15 @@ Deliver each phase as a working, runnable increment before starting the next.
 
 ## 16. Repository state
 
-Phase 1 backend is mostly built: auth and customer self-service, accounts and the double-entry ledger (RM 10,000 opening balance from the `JAGA-TREASURY` system account), transaction history, payees, idempotent transfers, and notifications with the in-app SMS inbox. Migrations are hand-written (`backend/alembic/versions/`), tests are in `backend/tests/`, and a Postman collection is in `postman/`. The frontend (`frontend/`) is scaffolded but not built yet.
+**Phase 1 is complete.**
+- **Backend:** auth and customer self-service (profile, password, sessions, devices), accounts and the double-entry ledger (RM 10,000 opening balance from the `JAGA-TREASURY` system account), transaction history, payees, idempotent transfers, notifications with the in-app SMS inbox. Migrations are hand-written (`backend/alembic/versions/`), tests are in `backend/tests/`, and a Postman collection is in `postman/`.
+- **Frontend (`frontend/`):** the customer app: welcome, login, register, home, history, payees + add payee, transfer flow (keypad, review, hold-to-send, receipt), inbox, profile, devices, sessions; light/dark theme; installable PWA. The browser only calls the Next.js server (`/api/auth/*` keeps the refresh token in an httpOnly cookie, `/api/bank/*` forwards everything else to FastAPI with the caller's IP).
+- **Docker Compose:** `postgres`, `redis`, `api` (runs `alembic upgrade head`, then serves) and `web`.
+- **ML (`ml/`, Phase 2b started):** `synthetic/generate.py` produces `datasets/jaga_synthetic_v2.csv` (~300k rows, 50 features, no missing values) plus its data dictionary (the feature contract). Datasets are gitignored.
 
-Local ports: web `3010`, API `8010`, Postgres `5432`, Redis `6380` (moved off the defaults to avoid clashing with other local projects).
+Customers who registered before accounts existed (step 3) have no bank account; register a new customer for testing.
+
+Local ports: web `3010`, API `8010`, Postgres `5432`, Redis `6380` (moved off the defaults to avoid clashing with other local projects). Phone testing: `cloudflared tunnel --url http://localhost:3010`.
 
 ---
 
@@ -451,7 +466,7 @@ Route groups: `(bank)` for the phone-first customer app, `(ops)` for the desktop
 | Drift monitoring | **Evidently** |
 | Data handling | **pandas** / **Polars**, **NumPy** |
 | Notebooks | **Jupyter** |
-| Offline pre-training data | **PaySim** / **IEEE-CIS** public datasets (training only, never shown in the app), then analyst labels |
+| Offline pre-training data | Jaga's own **synthetic simulator** (`ml/synthetic/`, main dataset), **PaySim** / **IEEE-CIS** as optional checks (training only, never shown in the app), then real labels |
 
 ### 17.5 Agentic AI
 
@@ -553,7 +568,11 @@ Jaga/
 │       ├── jobs/             # ARQ background jobs
 │       └── worker.py         # stream consumer / scoring worker
 ├── frontend/                 # Next.js app: app/(bank), app/(ops)
-├── ml/                       # training scripts, notebooks, datasets (gitignored)
+├── ml/                       # offline ML (own uv project)
+│   ├── synthetic/            #   synthetic dataset generator
+│   ├── datasets/             #   generated / downloaded data + data dictionary (gitignored)
+│   ├── train.py              #   classifier training, calibration, SHAP, MLflow logging
+│   └── models/               #   saved model + feature list + thresholds (gitignored)
 ├── rules/                    # YAML rules
 ├── postman/                  # API collection
 └── e2e/                      # Playwright scenarios, Locust load tests, agent eval runners

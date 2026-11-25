@@ -32,6 +32,45 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # FastAPI backend. Applies database migrations, then starts on :8010.
+  api:
+    build: ./backend
+    container_name: jaga-api
+    env_file: .env # JWT secret, opening balance, ...
+    environment:
+      # Inside Docker, services find each other by name, not "localhost".
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8010:8010" # still reachable from Postman on the laptop
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+  # Next.js customer app on :3010. The browser only talks to this; it
+  # forwards /api/bank/... and /api/auth/... to the api service.
+  web:
+    build: ./frontend
+    container_name: jaga-web
+    environment:
+      API_URL: http://api:8010
+      COOKIE_SECURE: "false" # plain http on localhost / Wi-Fi
+    ports:
+      - "3010:3010"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
